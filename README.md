@@ -13,7 +13,7 @@ fun main() = runBlocking {
 }
 ```
 
-This project is a proof of concept/thought experiment kind of thing and should not be taken seriously.
+This project is a proof of concept/thought experiment kind of thing and should not be taken seriously. You can read story [here](https://github.com/oakkitten/AsyncIterable/blob/main/STORY.md).
 
 To run tests, clone the repository and run:
 
