@@ -166,20 +166,40 @@ This approach has a few advantages, namely:
 
 * You need not worry about exception transparency
 
-* As the for loop is in control, you can break out of it. This also means that you can return from `forEach {}`. In flow, the `collect {}` block is used directly by the emitter, and hence must be marked `crossinline`. This is probably not very important, but if you were to rewrite [4] with flow, you would have to use something like: [7]
+* As the for loop is in control, you can break out of it. This also means that you can return from `forEach {}`. In flow, the `collect {}` block is used directly by the emitter, and hence must be marked `crossinline`. This is probably not very important, but if you were to rewrite [4] with flow, you would have to hope that it includes a specialty method for that, which it does: [7]
   ```kotlin
   squaresOfOddNumbers(999).asFlow()
-        .onEach { println(it) }
-        .takeWhile { it != 25 }
-        .collect()
+        .transformWhile { 
+            println(it)
+            it != 25 
+        }.collect()
   `````
+  
+* Each `asyncSequnce {}` call, and so every `filter {}` and `map {}`, etc create a new coroutine, so you can use regular scoping tools to run them using required context. With flows, you can use `flowOn()`, which might be better as it's explicit.
 
 It also has major disadvantages:
 
-* If you have a `try/finally` in the `asyncSequence {}` block, the finally clause may not run when you expect it to run. Unlike it is with `sequence {}`, the context that `asyncSequence {}` is running on is real, and the coroutine will get eventually cancelled— but this will not happen until `runBlocking {}` it's in ends. Perhaps one could try employing a finalizer here?
+* A coroutine, compared to a suspend function, is a very expensive object, and switching between coroutines is slow as well. Although I didn't benchmark it, `AsyncIterable` should prove to be considerably slower than `Flow`.
 
-* Each `asyncSequnce {}` call (and so every `filter {}` and `map {}`) creates a new coroutine. A coroutine, compared to a suspend function, is a very expensive object. This probably makes things considerably slower, although I didn't benchmark it.
+* Coroutines can be hard to debug, and having more of them doesn't help.
+  
+* If you have a `try/finally` in the `asyncSequence {}` block, the finally clause may not run when you expect it to run. This problem affects `sequence {}`/`iterator {}` as well. If you iterate to the end, the finally clause will execute normally, but if you abandon the sequence object, the coroutine may never be resumed.
+  
+  In some cases, this problem can go unnoticed; for instance, if `sequence {}` opens a `File`, after being garbage collected the finalizer of `File` will eventually close the resource. In a larger application, however, this may not happen fast enough, and the system may run out of file handlers. Besides, not all resources implement finalizers, and garbage collection can be turned off. This is not something you should rely on.
 
-* Coroutines can be hard to debug, and having more coroutines doesn't help there! 
+  `asyncSequence {}` have a major advantage over this: the context that it is running on is real, and the coroutine will get eventually cancelled by throwing `CancellationException`. Still, this will not happen until e.g. `runBlocking {}` ends, which may be too late. `flow {}`, on the other hand, doesn't have this issue at all.
+  
+  > Note: you can somewhat mitigate this by implementing a finalizer on the iterator object itself; for instance, Python will throw `GeneratorExit` when an abandoned generator is garbage collected. But this is not a real solution for reasons described above. 
+  > 
+  > You could also make the sequence object closeable, and write something along the following (This is what Python's trio [is suggesting](https://trio.readthedocs.io/en/stable/reference-core.html#finalization)): [8]
+  > ```kotlin
+  > val sequence = asyncSequence { ... }
+  > sequence.use {
+  >     it.forEach { ... }
+  > }
+  > ```
+  > Or perhaps “bake” this logic into the terminal methods such as `forEach {}` themselves. This would be dangerous still, as someone might write e.g. an extension terminal method that uses the for loop, or iterator methods themselves, directly.
+  >
+  >> Fun fact: in case of Python, asynchronous generators are not tied with contexts, so the generator's finally clause can run after the context becomes invalid, which is a huge issue.
 
-I tried making AsyncSequence to see if I could do it. I guess I learned a few things from doing that, and I hope you found this interesting as well. Thanks for reading!
+...I tried making AsyncSequence to see if I could do it. I guess I learned a few things from doing that, and I hope you found this interesting as well. Thanks for reading!
